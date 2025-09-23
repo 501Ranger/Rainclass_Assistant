@@ -594,7 +594,9 @@ class AutoClassBotApp:
 
             submit_button_xpath = '//div[contains(@class, "submit-btn") and contains(text(), "提交答案")]'
             submit_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, submit_button_xpath)))
-            submit_button.click()
+            # 使用 JavaScript 来点击按钮
+            self.log_message("尝试使用JavaScript提交答案。")
+            driver.execute_script("arguments[0].click();", submit_button)
             self.log_message("已提交答案。")
         except (TimeoutException, NoSuchElementException, ElementNotInteractableException) as e:
             self.log_message(f"无法完成答题流程，可能找不到题目或选项。错误信息: {e}")
