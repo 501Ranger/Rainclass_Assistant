@@ -369,15 +369,9 @@ class AutoClassBotApp:
         try:
             WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
             self.log_message("等待加载条消失...")
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 3).until(
                 EC.invisibility_of_element_located((By.XPATH, '//*[contains(@class, "jump_lesson__bar")]'))
             )
-
-            self.log_message("尝试点击学生标签...")
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, 'tab-student'))
-            ).click()
-            self.log_message("成功点击学生标签。")
 
         except (TimeoutException, ElementNotInteractableException):
             self.log_message("未能点击学生标签，尝试直接寻找正在进行的课程...")
@@ -521,7 +515,7 @@ class AutoClassBotApp:
             self.log_message("未找到习题提示，正在检查是否有未提交习题...")
             try:
                 submit_button_xpath = '//div[contains(@class, "submit-btn") and contains(text(), "提交答案")]'
-                WebDriverWait(driver, 10).until(
+                WebDriverWait(driver, 1).until(
                     EC.element_to_be_clickable((By.XPATH, submit_button_xpath))
                 )
                 self.log_message("检测到未提交的习题，正在准备答题。")
