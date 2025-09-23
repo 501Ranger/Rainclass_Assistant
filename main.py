@@ -11,11 +11,17 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from openai import OpenAI
 
 # 设置全局 driver 变量
 global driver
 # 设置你的 Gemini API Key
-GEMINI_API_KEY = "AIzaSyCK-8xCpBa7iKuJZnOwrH7scil2JMMrc0Y"
+# GEMINI_API_KEY = "AIzaSyCK-8xCpBa7iKuJZnOwrH7scil2JMMrc0Y"
+
+# --- 新增: 豆包 AI API Key ---
+# 豆包的 API Key，请访问 https://console.volcengine.com/ark/cn-beijing/credentials 获取
+DOUBAO_API_KEY = "daf27209-6748-45c1-b57d-a39e4332dc49"
+# ------------------------------
 
 # xxtui 的 API Key，请访问 https://www.xxtui.com/ 获取并替换为您自己的 Key
 XXTUI_API_KEY = "1dfd55d4bf3ce6b4"
@@ -193,9 +199,79 @@ def send_wechat_notification(title, content):
         print(f"bot: 发送微信通知时发生错误：{e}")
 
 
-def get_ai_answer(image_url):
+# --- 注释掉原有的 Gemini AI 答题函数
+# def get_ai_answer(image_url):
+#     """
+#     调用 Gemini API 获取习题答案。
+#
+#     Args:
+#         image_url (str): 题目图片 URL。
+#
+#     Returns:
+#         str: AI 预测的最佳选项（如 'A,B'），如果失败则返回 None。
+#     """
+#     if GEMINI_API_KEY == "your_api_key_here":
+#         print("bot: 警告！请在代码中设置您的 GEMINI_API_KEY 以启用 AI 答题功能。")
+#         return None
+#
+#     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={GEMINI_API_KEY}"
+#
+#     # 下载图片
+#     try:
+#         image_response = requests.get(image_url, timeout=10)
+#         image_response.raise_for_status()
+#         image_bytes = image_response.content
+#         base64_image = base64.b64encode(image_bytes).decode('utf-8')
+#     except requests.exceptions.RequestException as e:
+#         print(f"bot: 下载图片失败：{e}")
+#         return None
+#
+#     prompt = "看这张图片，请找出图中的习题。如果是单选题，请只返回一个选项字母（如 A）。如果是多选题，请返回所有正确选项的字母，并用逗号分隔（如 A,B,C）。如果无法确定，请返回 'C'。"
+#
+#     payload = {
+#         "contents": [
+#             {
+#                 "parts": [
+#                     {"text": prompt},
+#                     {
+#                         "inlineData": {
+#                             "mimeType": "image/jpeg",
+#                             "data": base64_image
+#                         }
+#                     }
+#                 ]
+#             }
+#         ]
+#     }
+#
+#     try:
+#         # 将超时时间设置为8秒
+#         response = requests.post(api_url, json=payload, timeout=8)
+#         response.raise_for_status()
+#
+#         result = response.json()
+#         candidate = result.get('candidates', [{}])[0]
+#         answer_text = candidate.get('content', {}).get('parts', [{}])[0].get('text', '').strip().upper()
+#
+#         # 移除答案文本中的非字母和非逗号字符
+#         cleaned_answer = ''.join(c for c in answer_text if 'A' <= c <= 'Z' or c == ',')
+#
+#         if cleaned_answer:
+#             print(f"bot: AI 预测的答案是：{cleaned_answer}")
+#             return cleaned_answer
+#
+#         print("bot: AI 未返回有效的答案选项。")
+#         return None
+#
+#     except requests.exceptions.RequestException as e:
+#         print(f"bot: 调用 Gemini API 失败或超时：{e}")
+#         return None
+# --- 注释结束 ---
+
+# --- 新增: 豆包 AI 答题函数 ---
+def get_doubao_answer(image_url):
     """
-    调用 Gemini API 获取习题答案。
+    调用豆包 AI API 获取习题答案。
 
     Args:
         image_url (str): 题目图片 URL。
@@ -203,48 +279,39 @@ def get_ai_answer(image_url):
     Returns:
         str: AI 预测的最佳选项（如 'A,B'），如果失败则返回 None。
     """
-    if GEMINI_API_KEY == "your_api_key_here":
-        print("bot: 警告！请在代码中设置您的 GEMINI_API_KEY 以启用 AI 答题功能。")
+    if not DOUBAO_API_KEY or DOUBAO_API_KEY == "your_api_key_here":
+        print("bot: 警告！请在代码中设置您的 DOUBAO_API_KEY 以启用 AI 答题功能。")
         return None
 
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={GEMINI_API_KEY}"
-
-    # 下载图片
-    try:
-        image_response = requests.get(image_url, timeout=10)
-        image_response.raise_for_status()
-        image_bytes = image_response.content
-        base64_image = base64.b64encode(image_bytes).decode('utf-8')
-    except requests.exceptions.RequestException as e:
-        print(f"bot: 下载图片失败：{e}")
-        return None
+    # 初始化 Ark 客户端
+    client = OpenAI(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=DOUBAO_API_KEY,
+    )
 
     prompt = "看这张图片，请找出图中的习题。如果是单选题，请只返回一个选项字母（如 A）。如果是多选题，请返回所有正确选项的字母，并用逗号分隔（如 A,B,C）。如果无法确定，请返回 'C'。"
 
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": base64_image
-                        }
-                    }
-                ]
-            }
-        ]
-    }
-
     try:
-        # 将超时时间设置为8秒
-        response = requests.post(api_url, json=payload, timeout=8)
-        response.raise_for_status()
+        response = client.chat.completions.create(
+            model="doubao-seed-1-6-250615",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image_url
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+            timeout=8  # 设置超时时间
+        )
 
-        result = response.json()
-        candidate = result.get('candidates', [{}])[0]
-        answer_text = candidate.get('content', {}).get('parts', [{}])[0].get('text', '').strip().upper()
+        answer_text = response.choices[0].message.content.strip().upper()
 
         # 移除答案文本中的非字母和非逗号字符
         cleaned_answer = ''.join(c for c in answer_text if 'A' <= c <= 'Z' or c == ',')
@@ -253,12 +320,13 @@ def get_ai_answer(image_url):
             print(f"bot: AI 预测的答案是：{cleaned_answer}")
             return cleaned_answer
 
-        print("bot: AI 未返回有效的答案选项。")
+        print("bot: 豆包 AI 未返回有效的答案选项。")
         return None
 
-    except requests.exceptions.RequestException as e:
-        print(f"bot: 调用 Gemini API 失败或超时：{e}")
+    except Exception as e:
+        print(f"bot: 调用豆包 AI API 失败或超时：{e}")
         return None
+# ------------------------------
 
 
 def check_and_sign_in(driver):
@@ -283,7 +351,7 @@ def check_and_sign_in(driver):
             class_name = "未知课程"
 
         print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 检测到签到。")
-        send_wechat_notification("自动签到提醒", f"课程【{class_name}】有签到任务，正在自动签到。")
+        send_wechat_notification("自动签到提醒", f"课程有签到任务，正在自动签到。")
 
         sign_in_button.click()
         print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 已成功自动签到。")
@@ -300,7 +368,7 @@ def answer(driver):
         # 尝试寻找新的课堂习题提示
         print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 正在尝试检测习题提示...")
         quiz_notification_xpath = '//*[contains(text(), "你有新的课堂习题")]'
-        new_quiz_element = WebDriverWait(driver, 10).until(
+        new_quiz_element = WebDriverWait(driver, 3).until(
             EC.element_to_be_clickable((By.XPATH, quiz_notification_xpath))
         )
 
@@ -315,7 +383,7 @@ def answer(driver):
             class_name = "未知课程"
 
         print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 发现新的课堂习题，已点击提示。")
-        send_wechat_notification("自动答题提醒", f"课程【{class_name}】有随堂测试，正在自动作答。")
+        send_wechat_notification("自动答题提醒", f"课程有随堂测试，正在自动作答。")
 
         new_quiz_element.click()
     except (TimeoutException, ElementNotInteractableException):
@@ -328,6 +396,7 @@ def answer(driver):
                 EC.element_to_be_clickable((By.XPATH, submit_button_xpath))
             )
             print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 检测到未提交的习题，正在准备答题。")
+            send_wechat_notification("自动答题提醒", f"课程有随堂测试，正在自动作答。")
         except (TimeoutException, ElementNotInteractableException):
             print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 未检测到新的习题或未提交的习题。")
             return
@@ -350,7 +419,7 @@ def answer(driver):
             EC.element_to_be_clickable((By.XPATH, answer_button_xpath))
         )
         print(f"{time.strftime('%H:%M:%S', time.localtime())} bot: 检测到主观题（'作答'按钮），已跳过作答。")
-        send_wechat_notification("自动答题提醒", f"课程【{class_name}】检测到主观题，已跳过作答。请手动处理。")
+        send_wechat_notification("自动答题提醒", f"课程检测到主观题，已跳过作答。请手动处理。")
         return
     except (TimeoutException, NoSuchElementException):
         # 如果没找到“作答”按钮，则继续执行下面的客观题答题逻辑
@@ -362,20 +431,21 @@ def answer(driver):
     try:
         # 首先等待整个习题容器加载，确保页面内容已更新
         print(f"bot: 正在等待习题容器加载...")
-        question_container = WebDriverWait(driver, 10).until(
+        question_container = WebDriverWait(driver, 3).until(
             EC.visibility_of_element_located((By.XPATH, '//section[contains(@class, "slide__cmp")]'))
         )
         print(f"bot: 习题容器已加载，正在等待题目图片...")
 
         # 在习题容器内寻找图片，并使用自定义等待条件确保链接有效
-        question_image = WebDriverWait(question_container, 10).until(
+        question_image = WebDriverWait(question_container, 3).until(
             wait_for_image_src((By.XPATH, './/img[contains(@class, "cover")]'))
         )
         image_url = question_image.get_attribute('src')
         print(f"bot: 题目图片链接已成功捕获，URL为：{image_url}")
 
-        # 调用 AI 获取答案
-        predicted_options_str = get_ai_answer(image_url)
+        # --- 调用 AI 获取答案，这里从 Gemini 切换到豆包 ---
+        predicted_options_str = get_doubao_answer(image_url)
+        # ----------------------------------------------------
 
         if predicted_options_str:
             # 将答案字符串转换为列表，并移除空字符串
