@@ -19,9 +19,6 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from openai import OpenAI
 
-# 设置全局 driver 变量
-global driver
-
 
 # 自定义等待条件：等待元素出现且其 src 属性不为空
 class wait_for_image_src(object):
@@ -52,6 +49,9 @@ class AutoClassBotApp:
         self.is_running = False
         self.stop_event = threading.Event()
         self.log_queue = queue.Queue()
+
+        # 全局驱动实例
+        self.driver = None
 
         self.setup_ui()
         self.start_log_processor()
@@ -206,17 +206,12 @@ class AutoClassBotApp:
         thread.start()
 
     def get_cookies(self):
+        """获取登录Cookies并保存，复用已启动的驱动"""
         self.log_message("开始获取Cookies，请在弹出的浏览器窗口中完成登录...")
-        chrome_options = Options()
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
+        if not self._start_driver():
+            return
 
-        # 根据设置启用无头模式
-        if self.settings.get("headless_mode", False):
-            chrome_options.add_argument('--headless=new')
-
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = self.driver
         driver.get('https://changjiang.yuketang.cn')
 
         try:
@@ -229,7 +224,8 @@ class AutoClassBotApp:
         except TimeoutException:
             self.log_message("获取Cookies超时，请重新尝试。")
         finally:
-            driver.quit()
+            # 不在这里关闭 driver，让它保持开启
+            pass
 
     def update_cookie_info(self):
         if os.path.exists("cookies.txt"):
@@ -299,8 +295,40 @@ class AutoClassBotApp:
 
         self.root.after(100, process_queue)
 
+    def _start_driver(self):
+        """初始化 Selenium 驱动，如果它尚未启动。"""
+        if self.driver is None or not self.driver.service.is_connectable():
+            self.log_message("正在启动浏览器...")
+            chrome_options = Options()
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            if self.settings.get("headless_mode", False):
+                chrome_options.add_argument('--headless=new')
+
+            try:
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                self.log_message("浏览器已启动。")
+            except Exception as e:
+                self.log_message(f"启动浏览器失败：{e}")
+                self.driver = None
+                return False
+        return True
+
+    def _stop_driver(self):
+        """安全地关闭 Selenium 驱动。"""
+        if self.driver:
+            self.log_message("正在关闭浏览器...")
+            self.driver.quit()
+            self.driver = None
+            self.log_message("浏览器已关闭。")
+
     def toggle_bot(self):
         if not self.is_running:
+            if not self._start_driver():
+                self.log_message("浏览器启动失败，无法开始自动答题。")
+                return
+
             self.is_running = True
             self.stop_event.clear()
             self.toggle_button.config(text="停止自动答题")
@@ -315,6 +343,7 @@ class AutoClassBotApp:
             self.toggle_button.config(text="启动自动答题")
             self.status_label.config(text="当前状态: 停止")
             self.log_message("自动答题已停止。")
+            self._stop_driver()
 
     def run_bot_loop(self):
         try:
@@ -328,7 +357,7 @@ class AutoClassBotApp:
 
                 if start_time_str <= current_time <= end_time_str:
                     self.log_message("正在检查是否有正在进行的课程...")
-                    self.get_into_class()
+                    self.get_into_class(self.driver)
                 else:
                     self.log_message(f"当前时间不在设置的检查时间段内 ({start_time_str} - {end_time_str})，跳过检查。")
 
@@ -338,26 +367,17 @@ class AutoClassBotApp:
 
         except Exception as e:
             self.log_message(f"发生意外错误：{e}")
-            self.toggle_bot()  # 发生错误时停止bot
+            # 发生错误时安全地停止 bot 并更新 UI
+            self.root.after(0, self.toggle_bot)
 
-    def get_into_class(self):
+    def get_into_class(self, driver):
         now_time = time.strftime("%H:%M", time.localtime())
 
-        chrome_options = Options()
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-
-        # 根据设置启用无头模式
-        if self.settings.get("headless_mode", False):
-            chrome_options.add_argument('--headless=new')
-
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # 移除driver初始化代码，直接使用传入的driver
         driver.get('https://changjiang.yuketang.cn')
 
         if not os.path.exists("cookies.txt"):
             self.log_message("未找到 cookies.txt，请先在'设置'中获取。")
-            driver.quit()
             return False
 
         with open("cookies.txt", "r") as f2:
@@ -399,8 +419,7 @@ class AutoClassBotApp:
         except Exception as e:
             self.log_message(f"发生意外错误：{e}")
         finally:
-            driver.quit()
-            self.log_message("浏览器已关闭。")
+            self.log_message("检查课程流程结束。")
             return False
 
     def send_wechat_notification(self, title, content):
