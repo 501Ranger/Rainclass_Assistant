@@ -144,7 +144,12 @@ class AutoClassBotApp:
         self.submit_delay_var, _ = create_setting_row(settings_frame, "提交答案等待时间 (秒):", ttk.Entry,
                                                       self.settings.get("submit_delay", "5"))
         self.check_interval_var, _ = create_setting_row(settings_frame, "检查/刷新间隔 (秒):", ttk.Entry,
-                                                        self.settings.get("check_interval", "10"))
+                                                        self.settings.get("check_interval", "60"))
+
+        # 新增题目刷新间隔设置
+        self.quiz_refresh_interval_var, _ = create_setting_row(settings_frame, "答题刷新间隔 (秒):", ttk.Entry,
+                                                               self.settings.get("quiz_refresh_interval", "10"))
+
         self.xxtui_key_var, _ = create_setting_row(settings_frame, "微信提醒API Key:", ttk.Entry,
                                                    self.settings.get("xxtui_api_key", ""))
 
@@ -174,7 +179,8 @@ class AutoClassBotApp:
             "doubao_api_key": "",
             "gemini_api_key": "",
             "submit_delay": 5,
-            "check_interval": 10,
+            "check_interval": 60,
+            "quiz_refresh_interval": 10,
             "xxtui_api_key": "",
             "last_cookie_warn_date": ""
         }
@@ -190,6 +196,7 @@ class AutoClassBotApp:
                 "gemini_api_key": self.gemini_key_var.get(),
                 "submit_delay": int(self.submit_delay_var.get()),
                 "check_interval": int(self.check_interval_var.get()),
+                "quiz_refresh_interval": int(self.quiz_refresh_interval_var.get()),
                 "xxtui_api_key": self.xxtui_key_var.get(),
                 "last_cookie_warn_date": self.settings.get("last_cookie_warn_date", "")
             }
@@ -198,7 +205,7 @@ class AutoClassBotApp:
             self.settings = settings
             self.log_message("设置已成功保存。")
         except ValueError:
-            messagebox.showerror("错误", "提交等待时间或检查间隔必须是数字。")
+            messagebox.showerror("错误", "提交等待时间、检查间隔或答题刷新间隔必须是数字。")
             self.log_message("错误：保存设置失败。")
 
     def run_get_cookies_thread(self):
@@ -402,7 +409,9 @@ class AutoClassBotApp:
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, class_element_xpath)))
             driver.find_element(By.XPATH, class_element_xpath).click()
 
-            self.log_message("我去上课啦！我将会每10s检测一次随堂测试和签到，直到下课。")
+            # 引用新的变量，用于日志提示
+            quiz_refresh_interval = int(self.settings.get("quiz_refresh_interval", 10))
+            self.log_message(f"我去上课啦！我将会每{quiz_refresh_interval}秒检测一次随堂测试和签到，直到下课。")
             driver.switch_to.window(driver.window_handles[-1])
 
             while not self.stop_event.is_set():
@@ -412,7 +421,8 @@ class AutoClassBotApp:
 
                 self.check_and_sign_in(driver)
                 self.answer(driver)
-                self.stop_event.wait(int(self.settings.get("check_interval", 10)))
+                # 使用新的设置值
+                self.stop_event.wait(quiz_refresh_interval)
 
         except TimeoutException:
             self.log_message("你现在没课。")
@@ -498,7 +508,7 @@ class AutoClassBotApp:
                 {"parts": [{"text": prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": base64_image}}]}]}
 
             try:
-                response = requests.post(api_url, json=payload, timeout=8)
+                response = requests.post(api_url, json=payload, timeout=15)
                 response.raise_for_status()
                 result = response.json()
                 candidate = result.get('candidates', [{}])[0]
@@ -560,18 +570,18 @@ class AutoClassBotApp:
             self.log_message(f"AI给出的答案是：{ai_answer}")
             self.send_wechat_notification("自动答题提醒",
                                           f"课程检测到主观题，已跳过作答。以下是AI给出的参考答案：\n\n{ai_answer}")
-
             return
+
         except (TimeoutException, NoSuchElementException):
             self.log_message("未检测到主观题，继续尝试客观题答题。")
 
         try:
             self.log_message("正在等待习题容器加载...")
-            question_container = WebDriverWait(driver, 3).until(
+            question_container = WebDriverWait(driver, 1).until(
                 EC.visibility_of_element_located((By.XPATH, '//section[contains(@class, "slide__cmp")]'))
             )
             self.log_message("习题容器已加载，正在等待题目图片...")
-            question_image = WebDriverWait(question_container, 3).until(
+            question_image = WebDriverWait(question_container, 1).until(
                 wait_for_image_src((By.XPATH, './/img[contains(@class, "cover")]'))
             )
             image_url = question_image.get_attribute('src')
@@ -579,41 +589,48 @@ class AutoClassBotApp:
 
             predicted_options_str = self.get_ai_answer(image_url, question_type="objective")
 
-            if predicted_options_str:
-                # 过滤并清洗答案
-                cleaned_answer = ''.join(c for c in predicted_options_str.upper() if 'A' <= c <= 'Z' or c == ',')
-                predicted_options = [opt.strip() for opt in cleaned_answer.split(',') if opt.strip()]
+            is_option_clicked = False
 
-                if predicted_options:
-                    self.log_message(f"AI预测的答案是：{', '.join(predicted_options)}")
-                    for option in predicted_options:
+            # --- START: 验证并处理 AI 答案的逻辑 ---
+            if predicted_options_str and "调用失败" not in predicted_options_str:
+                # 过滤出有效的字母和逗号
+                cleaned_answer = ''.join(c for c in predicted_options_str.upper() if 'A' <= c <= 'Z' or c == ',')
+
+                # 再次验证，确保清洗后的答案不为空且只包含有效的答案字符
+                valid_options = [opt.strip() for opt in cleaned_answer.split(',') if
+                                 opt.strip() in ['A', 'B', 'C', 'D']]  # 假设只有 A,B,C,D
+
+                if valid_options:
+                    self.log_message(f"AI预测的答案是：{', '.join(valid_options)}")
+                    for option in valid_options:
                         answer_xpath = f'//p[@data-option="{option}"]'
                         try:
                             answer_element = WebDriverWait(driver, 5).until(
                                 EC.element_to_be_clickable((By.XPATH, answer_xpath))
                             )
                             answer_element.click()
+                            is_option_clicked = True
                         except (TimeoutException, NoSuchElementException, ElementNotInteractableException):
                             self.log_message(f"未能点击选项 {option}。")
                 else:
-                    self.log_message("AI未返回有效的答案选项。将选择默认选项 A。")
-                    answer_xpath = '//p[@data-option="A"]'
-                    answer_element = WebDriverWait(driver, 5).until(
+                    self.log_message(f"AI返回了无效的答案：{predicted_options_str}。将尝试默认选项。")
+            else:
+                self.log_message("AI未能提供有效答案或返回了错误信息，将尝试默认选项。")
+            # --- END: 验证并处理 AI 答案的逻辑 ---
+
+            if not is_option_clicked:
+                self.log_message("AI未能提供有效答案或未能成功点击预测选项，将选择默认选项 A。")
+                answer_xpath = '//p[@data-option="A"]'
+                try:
+                    answer_element = WebDriverWait(driver, 1).until(
                         EC.element_to_be_clickable((By.XPATH, answer_xpath)))
                     answer_element.click()
-                    self.log_message("选择了默认选项 A。")
-            else:
-                self.log_message("AI未能提供答案或响应超时，将选择默认选项 A。")
-                answer_xpath = '//p[@data-option="A"]'
-                answer_element = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, answer_xpath)))
-                answer_element.click()
-                self.log_message("选择了默认选项 A。")
-
-            time.sleep(int(self.settings.get("submit_delay", 5)))
+                    self.log_message("已成功选择默认选项 A。")
+                except (TimeoutException, NoSuchElementException, ElementNotInteractableException) as e:
+                    self.log_message(f"无法点击默认选项A，错误信息: {e}")
 
             submit_button_xpath = '//div[contains(@class, "submit-btn") and contains(text(), "提交答案")]'
             submit_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, submit_button_xpath)))
-            # 使用 JavaScript 来点击按钮
             self.log_message("尝试使用JavaScript提交答案。")
             driver.execute_script("arguments[0].click();", submit_button)
             self.log_message("已提交答案。")
