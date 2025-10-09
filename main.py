@@ -183,7 +183,8 @@ class AutoClassBotApp:
             "check_interval": 60,
             "quiz_refresh_interval": 10,
             "xxtui_api_key": "",
-            "last_cookie_warn_date": ""
+            "last_cookie_warn_date": "",
+            "last_cookie_update_time": "" # 新增字段
         }
 
     def save_settings(self):
@@ -199,7 +200,8 @@ class AutoClassBotApp:
                 "check_interval": int(self.check_interval_var.get()),
                 "quiz_refresh_interval": int(self.quiz_refresh_interval_var.get()),
                 "xxtui_api_key": self.xxtui_key_var.get(),
-                "last_cookie_warn_date": self.settings.get("last_cookie_warn_date", "")
+                "last_cookie_warn_date": self.settings.get("last_cookie_warn_date", ""),
+                "last_cookie_update_time": self.settings.get("last_cookie_update_time", "") # 新增字段
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=4)
@@ -228,6 +230,9 @@ class AutoClassBotApp:
             with open("cookies.txt", "w") as f1:
                 f1.write(json.dumps(cookies))
             self.log_message("Cookies 已成功保存。")
+            # 更新cookies更新时间
+            self.settings["last_cookie_update_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.save_settings() # 保存更新时间到配置文件
             self.update_cookie_info()
         except TimeoutException:
             self.log_message("获取Cookies超时，请重新尝试。")
@@ -240,20 +245,20 @@ class AutoClassBotApp:
             with open("cookies.txt", "r") as f:
                 cookies = json.loads(f.read())
 
-            latest_expiry = 0
-            for cookie in cookies:
-                if 'expiry' in cookie:
-                    latest_expiry = max(latest_expiry, cookie['expiry'])
-
-            if latest_expiry > 0:
-                remaining_seconds = latest_expiry - time.time()
-                if remaining_seconds > 0:
-                    remaining_days = remaining_seconds / (60 * 60 * 24)
+            last_update_time_str = self.settings.get("last_cookie_update_time")
+            if last_update_time_str:
+                last_update_datetime = datetime.strptime(last_update_time_str, "%Y-%m-%d %H:%M:%S")
+                time_difference = datetime.now() - last_update_datetime
+                days_passed = time_difference.days
+                
+                remaining_days = 14 - days_passed
+                
+                if remaining_days > 0:
                     self.cookie_status_label.config(text=f"Cookies有效期: 约{remaining_days:.1f}天")
                 else:
                     self.cookie_status_label.config(text="Cookies有效期: 已过期", foreground="red")
             else:
-                self.cookie_status_label.config(text="Cookies有效期: 未知 (无过期信息)")
+                self.cookie_status_label.config(text="Cookies有效期: 未知 (未记录更新时间)", foreground="gray")
         else:
             self.cookie_status_label.config(text="Cookies有效期: 未找到 cookies.txt", foreground="orange")
 
@@ -261,29 +266,27 @@ class AutoClassBotApp:
         if not os.path.exists("cookies.txt"):
             return
 
-        with open("cookies.txt", "r") as f:
-            cookies = json.loads(f.read())
+        last_update_time_str = self.settings.get("last_cookie_update_time")
+        if not last_update_time_str:
+            return # 如果没有记录更新时间，则不进行提醒
 
-        latest_expiry = 0
-        for cookie in cookies:
-            if 'expiry' in cookie:
-                latest_expiry = max(latest_expiry, cookie['expiry'])
+        last_update_datetime = datetime.strptime(last_update_time_str, "%Y-%m-%d %H:%M:%S")
+        time_difference = datetime.now() - last_update_datetime
+        days_passed = time_difference.days
 
-        if latest_expiry > 0:
-            remaining_seconds = latest_expiry - time.time()
-            remaining_days = remaining_seconds / (60 * 60 * 24)
+        remaining_days = 14 - days_passed
 
-            now = datetime.now()
-            last_warn_date = self.settings.get("last_cookie_warn_date", "")
+        now = datetime.now()
+        last_warn_date = self.settings.get("last_cookie_warn_date", "")
 
-            # 如果有效期小于等于3天，且当前时间是8点左右，且今天未发送过提醒
-            if remaining_days <= 3 and now.hour == 8 and now.strftime("%Y-%m-%d") != last_warn_date:
-                title = "长江雨课堂助手：Cookies即将过期"
-                content = f"您的登录Cookies还剩约{remaining_days:.1f}天过期。请尽快在设置页面重新获取Cookies。"
-                self.log_message(f"Cookies有效期不足3天，正在发送微信提醒。")
-                self.send_wechat_notification(title, content)
-                self.settings["last_cookie_warn_date"] = now.strftime("%Y-%m-%d")
-                self.save_settings()  # 保存新的提醒日期
+        # 如果有效期小于等于3天，且当前时间是8点左右，且今天未发送过提醒
+        if remaining_days <= 3 and now.hour == 8 and now.strftime("%Y-%m-%d") != last_warn_date:
+            title = "长江雨课堂助手：Cookies即将过期"
+            content = f"您的登录Cookies还剩约{remaining_days:.1f}天过期。请尽快在设置页面重新获取Cookies。"
+            self.log_message(f"Cookies有效期不足3天，正在发送微信提醒。")
+            self.send_wechat_notification(title, content)
+            self.settings["last_cookie_warn_date"] = now.strftime("%Y-%m-%d")
+            self.save_settings()  # 保存新的提醒日期
 
     def log_message(self, message):
         self.log_queue.put(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
@@ -449,25 +452,18 @@ class AutoClassBotApp:
         return False # 如果停止事件被设置，退出重试循环
 
     def _check_network_connectivity(self):
-        """通过 ping baidu.com 检查网络连通性"""
+        """通过 requests 访问 baidu.com 检查网络连通性"""
+        self.log_message("正在检查网络连通性...")
         try:
-            # 根据操作系统选择 ping 命令
-            param = '-n' if os.name == 'nt' else '-c'
-            command = ['ping', param, '1', 'baidu.com']
-            # 执行 ping 命令，并捕获输出
-            result = subprocess.run(command, capture_output=True, text=True, timeout=5)
-            # 检查 ping 命令的返回码，0 表示成功
-            if result.returncode == 0:
-                self.log_message("网络连接正常。")
-                return True
-            else:
-                self.log_message(f"网络连接异常：{result.stderr or result.stdout}")
-                return False
-        except subprocess.TimeoutExpired:
-            self.log_message("网络连接超时：ping 命令未在规定时间内返回。")
+            # 尝试访问一个可靠的网站，设置较短的超时
+            requests.get('http://www.baidu.com', timeout=5)
+            self.log_message("网络连接正常。")
+            return True
+        except requests.exceptions.RequestException as e:
+            self.log_message(f"网络连接异常：无法访问目标网站。错误信息: {e}")
             return False
         except Exception as e:
-            self.log_message(f"检查网络连通性时发生错误：{e}")
+            self.log_message(f"检查网络连通性时发生意外错误：{e}")
             return False
 
     def send_wechat_notification(self, title, content):
