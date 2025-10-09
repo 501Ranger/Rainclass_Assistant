@@ -8,6 +8,7 @@ import queue
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from datetime import datetime
+import subprocess # 导入 subprocess 模块
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementNotInteractableException
@@ -379,57 +380,94 @@ class AutoClassBotApp:
 
     def get_into_class(self, driver):
         now_time = time.strftime("%H:%M", time.localtime())
+        retry_delay = 10  # 重试间隔时间（秒）
 
-        # 移除driver初始化代码，直接使用传入的driver
-        driver.get('https://changjiang.yuketang.cn')
+        while not self.stop_event.is_set():
+            # 在尝试访问网页前先检查网络连通性
+            if not self._check_network_connectivity():
+                self.log_message(f"网络不通，将在 {retry_delay} 秒后重试...")
+                self.stop_event.wait(retry_delay)
+                continue # 跳过当前循环，直接进入下一次重试
 
-        if not os.path.exists("cookies.txt"):
-            self.log_message("未找到 cookies.txt，请先在'设置'中获取。")
+            try:
+                # 移除driver初始化代码，直接使用传入的driver
+                driver.get('https://changjiang.yuketang.cn')
+
+                if not os.path.exists("cookies.txt"):
+                    self.log_message("未找到 cookies.txt，请先在'设置'中获取。")
+                    return False
+
+                with open("cookies.txt", "r") as f2:
+                    cookies = json.loads(f2.read())
+                for cook in cookies:
+                    driver.add_cookie(cook)
+                driver.refresh()
+
+                WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                self.log_message("等待加载条消失...")
+                WebDriverWait(driver, 3).until(
+                    EC.invisibility_of_element_located((By.XPATH, '//*[contains(@class, "jump_lesson__bar")]'))
+                )
+
+                self.log_message("正在检查是否有正在进行的课程...")
+                class_element_xpath = '//*[contains(@class, "onlesson")]'
+                try:
+                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, class_element_xpath)))
+                    driver.find_element(By.XPATH, class_element_xpath).click()
+
+                    # 引用新的变量，用于日志提示
+                    quiz_refresh_interval = int(self.settings.get("quiz_refresh_interval", 10))
+                    self.log_message(f"我去上课啦！我将会每{quiz_refresh_interval}秒检测一次随堂测试和签到，直到下课。")
+                    driver.switch_to.window(driver.window_handles[-1])
+
+                    while not self.stop_event.is_set():
+                        if driver.find_elements(By.XPATH, '//div[@title="下课啦！" and contains(@class, "timeline__msg")]'):
+                            self.log_message("检测到下课啦！自动答题已停止。")
+                            break
+
+                        self.check_and_sign_in(driver)
+                        self.answer(driver)
+                        # 使用新的设置值
+                        self.stop_event.wait(quiz_refresh_interval)
+                    return True # 课程结束或停止事件触发，退出重试循环
+                except TimeoutException:
+                    self.log_message("你现在没课。")
+                    return False # 没课，退出重试循环，不进行重试
+                except (NoSuchElementException, ElementNotInteractableException) as e:
+                    self.log_message(f"未能点击课程元素或发生其他页面交互错误：{e}。将在 {retry_delay} 秒后重试...")
+                    self.stop_event.wait(retry_delay) # 等待一段时间后重试
+                    continue # 继续外层 while 循环进行重试
+
+            except requests.exceptions.RequestException as e:
+                self.log_message(f"检测上课时发生网络请求错误：{e}。将在 {retry_delay} 秒后重试...")
+                self.stop_event.wait(retry_delay)
+            except Exception as e:
+                self.log_message(f"检测上课时发生意外错误：{e}。将在 {retry_delay} 秒后重试...")
+                self.stop_event.wait(retry_delay)
+            finally:
+                self.log_message("检查课程流程结束。")
+        return False # 如果停止事件被设置，退出重试循环
+
+    def _check_network_connectivity(self):
+        """通过 ping baidu.com 检查网络连通性"""
+        try:
+            # 根据操作系统选择 ping 命令
+            param = '-n' if os.name == 'nt' else '-c'
+            command = ['ping', param, '1', 'baidu.com']
+            # 执行 ping 命令，并捕获输出
+            result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+            # 检查 ping 命令的返回码，0 表示成功
+            if result.returncode == 0:
+                self.log_message("网络连接正常。")
+                return True
+            else:
+                self.log_message(f"网络连接异常：{result.stderr or result.stdout}")
+                return False
+        except subprocess.TimeoutExpired:
+            self.log_message("网络连接超时：ping 命令未在规定时间内返回。")
             return False
-
-        with open("cookies.txt", "r") as f2:
-            cookies = json.loads(f2.read())
-        for cook in cookies:
-            driver.add_cookie(cook)
-        driver.refresh()
-
-        try:
-            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            self.log_message("等待加载条消失...")
-            WebDriverWait(driver, 3).until(
-                EC.invisibility_of_element_located((By.XPATH, '//*[contains(@class, "jump_lesson__bar")]'))
-            )
-
-        except (TimeoutException, ElementNotInteractableException):
-            self.log_message("未能点击学生标签，尝试直接寻找正在进行的课程...")
-
-        try:
-            self.log_message("正在检查是否有正在进行的课程...")
-            class_element_xpath = '//*[contains(@class, "onlesson")]'
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, class_element_xpath)))
-            driver.find_element(By.XPATH, class_element_xpath).click()
-
-            # 引用新的变量，用于日志提示
-            quiz_refresh_interval = int(self.settings.get("quiz_refresh_interval", 10))
-            self.log_message(f"我去上课啦！我将会每{quiz_refresh_interval}秒检测一次随堂测试和签到，直到下课。")
-            driver.switch_to.window(driver.window_handles[-1])
-
-            while not self.stop_event.is_set():
-                if driver.find_elements(By.XPATH, '//div[@title="下课啦！" and contains(@class, "timeline__msg")]'):
-                    self.log_message("检测到下课啦！自动答题已停止。")
-                    break
-
-                self.check_and_sign_in(driver)
-                self.answer(driver)
-                # 使用新的设置值
-                self.stop_event.wait(quiz_refresh_interval)
-
-        except TimeoutException:
-            self.log_message("你现在没课。")
         except Exception as e:
-            self.log_message(f"发生意外错误：{e}")
-        finally:
-            self.log_message("检查课程流程结束。")
+            self.log_message(f"检查网络连通性时发生错误：{e}")
             return False
 
     def send_wechat_notification(self, title, content):
