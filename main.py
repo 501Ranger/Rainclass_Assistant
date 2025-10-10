@@ -317,11 +317,17 @@ class AutoClassBotApp:
                 chrome_options.add_argument('--headless=new')
 
             try:
+                # 尝试安装并获取 ChromeDriver 服务
                 service = Service(ChromeDriverManager().install())
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
                 self.log_message("浏览器已启动。")
             except Exception as e:
                 self.log_message(f"启动浏览器失败：{e}")
+                self.log_message("请检查以下可能的原因：")
+                self.log_message("1. 您的网络连接是否正常，以便下载 ChromeDriver。")
+                self.log_message("2. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。")
+                self.log_message("3. 运行环境是否有足够的权限启动浏览器。")
+                self.log_message("4. 尝试更新 Chrome 浏览器到最新版本。")
                 self.driver = None
                 return False
         return True
@@ -338,6 +344,9 @@ class AutoClassBotApp:
         if not self.is_running:
             if not self._start_driver():
                 self.log_message("浏览器启动失败，无法开始自动答题。")
+                self.is_running = False  # 确保状态为停止
+                self.toggle_button.config(text="启动自动答题")
+                self.status_label.config(text="当前状态: 停止")
                 return
 
             self.is_running = True
