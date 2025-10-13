@@ -512,9 +512,11 @@ class AutoClassBotApp:
         model = self.settings.get("ai_model", "豆包AI")
         prompt = ""
         if question_type == "objective":
-            prompt = "看这张图片，请找出图中的习题。如果是单选题，请只返回一个选项字母（如 A）。如果是多选题，请返回所有正确选项的字母，并用逗号分隔（如 A,B,C）。如果无法确定，请返回 'C'。"
+            # 引导AI做出最快的回答，强调简洁和直接
+            prompt = "请快速分析这张图片中的习题。如果是单选题，请只返回一个选项字母（如 A）。如果是多选题，请返回所有正确选项的字母，并用逗号分隔（如 A,B,C）。如果无法确定，请返回 'C'。请确保回答简洁直接，不要包含任何额外信息。"
         elif question_type == "subjective":
-            prompt = "看这张图片，请帮我解答这道主观题。请直接给出你的答案，不要包含任何额外的解释或格式。"
+            # 引导AI做出最快的回答，强调简洁和直接
+            prompt = "请快速解答这张图片中的主观题。请直接给出你的答案，不要包含任何额外的解释或格式，力求简洁明了。"
 
         # 下载图片
         try:
@@ -552,7 +554,8 @@ class AutoClassBotApp:
             if not gemini_key:
                 return "未设置Gemini AI API Key，无法获取答案。"
 
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={gemini_key}"
+            # 根据用户反馈，将模型名称从 'gemini-2.5-flash-preview-05-20' 改为 'gemini-2.5-flash'
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
             base64_image = base64.b64encode(image_bytes).decode('utf-8')
             payload = {"contents": [
                 {"parts": [{"text": prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": base64_image}}]}]}
