@@ -497,15 +497,15 @@ class AutoClassBotApp:
         return False # 如果停止事件被设置，退出重试循环
 
     def _check_network_connectivity(self):
-        """通过 requests 访问 baidu.com 检查网络连通性"""
+        """通过 requests 访问雨课堂网站检查网络连通性"""
         self.log_message("正在检查网络连通性...")
         try:
-            # 尝试访问一个可靠的网站，设置较短的超时
-            requests.get('http://www.baidu.com', timeout=5)
+            # 尝试访问雨课堂网站，设置较短的超时
+            requests.get('https://changjiang.yuketang.cn', timeout=5)
             self.log_message("网络连接正常。")
             return True
         except requests.exceptions.RequestException as e:
-            self.log_message(f"网络连接异常：无法访问目标网站。错误信息: {e}")
+            self.log_message(f"网络连接异常：无法访问雨课堂网站。错误信息: {e}")
             return False
         except Exception as e:
             self.log_message(f"检查网络连通性时发生意外错误：{e}")
