@@ -155,6 +155,10 @@ class AutoClassBotApp:
         self.xxtui_key_var, _ = create_setting_row(settings_frame, "微信提醒API Key:", ttk.Entry,
                                                    self.settings.get("xxtui_api_key", ""))
 
+        # 新增 ChromeDriver 路径设置
+        self.chromedriver_path_var, _ = create_setting_row(settings_frame, "ChromeDriver 路径 (可选):", ttk.Entry,
+                                                           self.settings.get("chromedriver_path", ""))
+
         # 按钮
         button_frame = ttk.Frame(settings_frame)
         button_frame.pack(fill="x", pady=20)
@@ -185,7 +189,8 @@ class AutoClassBotApp:
             "quiz_refresh_interval": 10,
             "xxtui_api_key": "",
             "last_cookie_warn_date": "",
-            "last_cookie_update_time": "" # 新增字段
+            "last_cookie_update_time": "", # 新增字段
+            "chromedriver_path": "" # 新增 ChromeDriver 路径字段
         }
 
     def save_settings(self):
@@ -202,7 +207,8 @@ class AutoClassBotApp:
                 "quiz_refresh_interval": int(self.quiz_refresh_interval_var.get()),
                 "xxtui_api_key": self.xxtui_key_var.get(),
                 "last_cookie_warn_date": self.settings.get("last_cookie_warn_date", ""),
-                "last_cookie_update_time": self.settings.get("last_cookie_update_time", "") # 新增字段
+                "last_cookie_update_time": self.settings.get("last_cookie_update_time", ""), # 新增字段
+                "chromedriver_path": self.chromedriver_path_var.get() # 保存 ChromeDriver 路径
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=4)
@@ -318,19 +324,42 @@ class AutoClassBotApp:
                 chrome_options.add_argument('--headless=new')
             self.log_message("Chrome 选项已配置。")
 
+            chromedriver_path = self.settings.get("chromedriver_path")
+            service = None
+
+            if chromedriver_path and os.path.exists(chromedriver_path):
+                self.log_message(f"检测到本地 ChromeDriver 路径：{chromedriver_path}，尝试使用本地驱动。")
+                try:
+                    service = Service(executable_path=chromedriver_path)
+                    self.log_message("已使用本地 ChromeDriver 服务。")
+                except Exception as e:
+                    self.log_message(f"使用本地 ChromeDriver 失败：{e}。将尝试在线获取。")
+                    service = None # 重置 service，以便尝试在线获取
+            
+            if service is None: # 如果本地驱动失败或未提供，则尝试在线获取
+                self.log_message("正在尝试在线安装或获取 ChromeDriver 服务...")
+                try:
+                    service = Service(ChromeDriverManager().install())
+                    self.log_message("ChromeDriver 服务已准备就绪（在线获取）。")
+                except Exception as e:
+                    self.log_message(f"在线安装或获取 ChromeDriver 服务失败：{e}")
+                    self.log_message("请检查以下可能的原因：")
+                    self.log_message("1. 您的网络连接是否正常，以便下载 ChromeDriver。")
+                    self.log_message("2. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。")
+                    self.log_message("3. 运行环境是否有足够的权限启动浏览器。")
+                    self.log_message("4. 尝试更新 Chrome 浏览器到最新版本。")
+                    self.driver = None
+                    return False
+
             try:
-                self.log_message("正在尝试安装或获取 ChromeDriver 服务...")
-                service = Service(ChromeDriverManager().install())
-                self.log_message("ChromeDriver 服务已准备就绪。")
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
                 self.log_message("浏览器实例已成功启动。")
             except Exception as e:
                 self.log_message(f"启动浏览器失败：{e}")
                 self.log_message("请检查以下可能的原因：")
-                self.log_message("1. 您的网络连接是否正常，以便下载 ChromeDriver。")
-                self.log_message("2. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。")
-                self.log_message("3. 运行环境是否有足够的权限启动浏览器。")
-                self.log_message("4. 尝试更新 Chrome 浏览器到最新版本。")
+                self.log_message("1. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。")
+                self.log_message("2. 运行环境是否有足够的权限启动浏览器。")
+                self.log_message("3. 尝试更新 Chrome 浏览器到最新版本。")
                 self.driver = None
                 return False
         else:
