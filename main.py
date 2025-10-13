@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from datetime import datetime
 import subprocess # 导入 subprocess 模块
+import traceback # 导入 traceback 模块
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementNotInteractableException
@@ -309,18 +310,20 @@ class AutoClassBotApp:
     def _start_driver(self):
         """初始化 Selenium 驱动，如果它尚未启动。"""
         if self.driver is None or not self.driver.service.is_connectable():
-            self.log_message("正在启动浏览器...")
+            self.log_message("开始初始化浏览器驱动...")
             chrome_options = Options()
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             if self.settings.get("headless_mode", False):
                 chrome_options.add_argument('--headless=new')
+            self.log_message("Chrome 选项已配置。")
 
             try:
-                # 尝试安装并获取 ChromeDriver 服务
+                self.log_message("正在尝试安装或获取 ChromeDriver 服务...")
                 service = Service(ChromeDriverManager().install())
+                self.log_message("ChromeDriver 服务已准备就绪。")
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                self.log_message("浏览器已启动。")
+                self.log_message("浏览器实例已成功启动。")
             except Exception as e:
                 self.log_message(f"启动浏览器失败：{e}")
                 self.log_message("请检查以下可能的原因：")
@@ -330,6 +333,8 @@ class AutoClassBotApp:
                 self.log_message("4. 尝试更新 Chrome 浏览器到最新版本。")
                 self.driver = None
                 return False
+        else:
+            self.log_message("浏览器驱动已存在且可连接，无需重新启动。")
         return True
 
     def _stop_driver(self):
@@ -416,10 +421,11 @@ class AutoClassBotApp:
                 driver.refresh()
 
                 WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                self.log_message("等待加载条消失...")
-                WebDriverWait(driver, 3).until(
-                    EC.invisibility_of_element_located((By.XPATH, '//*[contains(@class, "jump_lesson__bar")]'))
-                )
+                # 根据用户反馈，移除等待加载条消失的功能
+                # self.log_message("等待加载条消失...")
+                # WebDriverWait(driver, 10).until(
+                #     EC.invisibility_of_element_located((By.XPATH, '//*[contains(@class, "jump_lesson__bar")]'))
+                # )
 
                 self.log_message("正在检查是否有正在进行的课程...")
                 class_element_xpath = '//*[contains(@class, "onlesson")]'
@@ -454,7 +460,8 @@ class AutoClassBotApp:
                 self.log_message(f"检测上课时发生网络请求错误：{e}。将在 {retry_delay} 秒后重试...")
                 self.stop_event.wait(retry_delay)
             except Exception as e:
-                self.log_message(f"检测上课时发生意外错误：{e}。将在 {retry_delay} 秒后重试...")
+                error_traceback = traceback.format_exc()
+                self.log_message(f"检测上课时发生意外错误：{e}\n详细堆栈信息：\n{error_traceback}。将在 {retry_delay} 秒后重试...")
                 self.stop_event.wait(retry_delay)
             finally:
                 self.log_message("检查课程流程结束。")
