@@ -8,11 +8,16 @@ import queue
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from datetime import datetime
-import subprocess # 导入 subprocess 模块
-import traceback # 导入 traceback 模块
+import subprocess  # 导入 subprocess 模块
+import traceback  # 导入 traceback 模块
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementNotInteractableException
+from selenium.common.exceptions import (
+    TimeoutException,
+    NoSuchElementException,
+    ElementNotInteractableException,
+    StaleElementReferenceException,
+)
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
@@ -30,7 +35,7 @@ class wait_for_image_src(object):
     def __call__(self, driver):
         try:
             element = EC.visibility_of_element_located(self.locator)(driver)
-            if element and element.get_attribute('src'):
+            if element and element.get_attribute("src"):
                 return element
             else:
                 return False
@@ -42,7 +47,7 @@ class AutoClassBotApp:
     def __init__(self, root):
         self.root = root
         self.root.title("长江雨课堂自动助手")
-        self.root.geometry("600x600")
+        self.root.geometry("600x650")
 
         # 配置文件路径
         self.config_file = "config.json"
@@ -81,22 +86,32 @@ class AutoClassBotApp:
         control_frame = ttk.Frame(self.home_frame, padding="10")
         control_frame.pack(fill="x")
 
-        self.status_label = ttk.Label(control_frame, text="当前状态: 停止", font=("Helvetica", 12))
+        self.status_label = ttk.Label(
+            control_frame, text="当前状态: 停止", font=("Helvetica", 12)
+        )
         self.status_label.pack(side="left", padx=(0, 20))
 
-        self.toggle_button = ttk.Button(control_frame, text="启动自动答题", command=self.toggle_bot)
+        self.toggle_button = ttk.Button(
+            control_frame, text="启动自动答题", command=self.toggle_bot
+        )
         self.toggle_button.pack(side="left")
 
         # Cookies 有效期显示
-        self.cookie_status_label = ttk.Label(control_frame, text="Cookies有效期: 未知", font=("Helvetica", 10),
-                                             foreground="gray")
+        self.cookie_status_label = ttk.Label(
+            control_frame,
+            text="Cookies有效期: 未知",
+            font=("Helvetica", 10),
+            foreground="gray",
+        )
         self.cookie_status_label.pack(side="right")
 
         # 日志区域
         log_frame = ttk.Frame(self.home_frame, padding="10")
         log_frame.pack(expand=True, fill="both")
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state='disabled', font=("Monospaced", 10))
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame, wrap=tk.WORD, state="disabled", font=("Monospaced", 10)
+        )
         self.log_text.pack(expand=True, fill="both")
 
     def setup_settings_ui(self):
@@ -104,7 +119,9 @@ class AutoClassBotApp:
         settings_frame.pack(expand=True, fill="both")
 
         # helper function to create rows
-        def create_setting_row(parent, label_text, widget_class, default_value=None, options=None):
+        def create_setting_row(
+            parent, label_text, widget_class, default_value=None, options=None
+        ):
             row = ttk.Frame(parent)
             row.pack(fill="x", pady=5)
             label = ttk.Label(row, text=label_text, width=20)
@@ -125,48 +142,123 @@ class AutoClassBotApp:
             return var, widget
 
         # 设置项
-        self.start_time_var, _ = create_setting_row(settings_frame, "每日开始时间 (HH:MM):", ttk.Entry,
-                                                    self.settings.get("start_time", "07:00"))
-        self.end_time_var, _ = create_setting_row(settings_frame, "每日结束时间 (HH:MM):", ttk.Entry,
-                                                  self.settings.get("end_time", "22:00"))
+        self.start_time_var, _ = create_setting_row(
+            settings_frame,
+            "每日开始时间 (HH:MM):",
+            ttk.Entry,
+            self.settings.get("start_time", "07:00"),
+        )
+        self.end_time_var, _ = create_setting_row(
+            settings_frame,
+            "每日结束时间 (HH:MM):",
+            ttk.Entry,
+            self.settings.get("end_time", "22:00"),
+        )
 
         # 新增无头模式选项
-        self.headless_var, _ = create_setting_row(settings_frame, "静默运行 (无头模式):", ttk.Checkbutton,
-                                                  self.settings.get("headless_mode", False))
+        self.headless_var, _ = create_setting_row(
+            settings_frame,
+            "静默运行 (无头模式):",
+            ttk.Checkbutton,
+            self.settings.get("headless_mode", False),
+        )
 
-        self.ai_model_var, self.ai_model_combobox = create_setting_row(settings_frame, "AI模型选择:", ttk.Combobox,
-                                                                       self.settings.get("ai_model", "豆包AI"),
-                                                                       options=["豆包AI", "Gemini AI"])
+        self.ai_model_var, self.ai_model_combobox = create_setting_row(
+            settings_frame,
+            "AI模型选择:",
+            ttk.Combobox,
+            self.settings.get("ai_model", "Deepseek"),
+            options=["Deepseek", "Gemini AI", "Custom"],
+        )
 
-        self.doubao_key_var, _ = create_setting_row(settings_frame, "豆包AI API Key:", ttk.Entry,
-                                                    self.settings.get("doubao_api_key", ""))
-        self.gemini_key_var, _ = create_setting_row(settings_frame, "Gemini AI API Key:", ttk.Entry,
-                                                    self.settings.get("gemini_api_key", ""))
+        self.deepseek_key_var, _ = create_setting_row(
+            settings_frame,
+            "DeepSeek API Key:",
+            ttk.Entry,
+            self.settings.get("deepseek_api_key", ""),
+        )
+        self.gemini_key_var, _ = create_setting_row(
+            settings_frame,
+            "Gemini AI API Key:",
+            ttk.Entry,
+            self.settings.get("gemini_api_key", ""),
+        )
 
-        self.submit_delay_var, _ = create_setting_row(settings_frame, "提交答案等待时间 (秒):", ttk.Entry,
-                                                      self.settings.get("submit_delay", "5"))
-        self.check_interval_var, _ = create_setting_row(settings_frame, "检查/刷新间隔 (秒):", ttk.Entry,
-                                                        self.settings.get("check_interval", "60"))
+        self.custom_api_base_url, _ = create_setting_row(
+            settings_frame,
+            "Custom API Base Url:",
+            ttk.Entry,
+            self.settings.get("custom_api_base_url", ""),
+        )
+
+        self.custom_api_key, _ = create_setting_row(
+            settings_frame,
+            "Custom API Key:",
+            ttk.Entry,
+            self.settings.get("custom_api_key", ""),
+        )
+
+        self.custom_model, _ = create_setting_row(
+            settings_frame,
+            "Custom Model:",
+            ttk.Entry,
+            self.settings.get("custom_model", ""),
+        )
+
+        self.submit_delay_var, _ = create_setting_row(
+            settings_frame,
+            "提交答案等待时间 (秒):",
+            ttk.Entry,
+            self.settings.get("submit_delay", "5"),
+        )
+        self.subjective_delay_var, _ = create_setting_row(
+            settings_frame,
+            "主观题作答延迟 (秒):",
+            ttk.Entry,
+            self.settings.get("subjective_delay", 30),
+        )
+        self.check_interval_var, _ = create_setting_row(
+            settings_frame,
+            "检查/刷新间隔 (秒):",
+            ttk.Entry,
+            self.settings.get("check_interval", "60"),
+        )
 
         # 新增题目刷新间隔设置
-        self.quiz_refresh_interval_var, _ = create_setting_row(settings_frame, "答题刷新间隔 (秒):", ttk.Entry,
-                                                               self.settings.get("quiz_refresh_interval", "10"))
+        self.quiz_refresh_interval_var, _ = create_setting_row(
+            settings_frame,
+            "答题刷新间隔 (秒):",
+            ttk.Entry,
+            self.settings.get("quiz_refresh_interval", "10"),
+        )
 
-        self.xxtui_key_var, _ = create_setting_row(settings_frame, "微信提醒API Key:", ttk.Entry,
-                                                   self.settings.get("xxtui_api_key", ""))
+        self.xxtui_key_var, _ = create_setting_row(
+            settings_frame,
+            "微信提醒API Key:",
+            ttk.Entry,
+            self.settings.get("xxtui_api_key", ""),
+        )
 
         # 新增 ChromeDriver 路径设置
-        self.chromedriver_path_var, _ = create_setting_row(settings_frame, "ChromeDriver 路径 (可选):", ttk.Entry,
-                                                           self.settings.get("chromedriver_path", ""))
+        self.chromedriver_path_var, _ = create_setting_row(
+            settings_frame,
+            "ChromeDriver 路径 (可选):",
+            ttk.Entry,
+            self.settings.get("chromedriver_path", ""),
+        )
 
         # 按钮
         button_frame = ttk.Frame(settings_frame)
         button_frame.pack(fill="x", pady=20)
 
-        save_button = ttk.Button(button_frame, text="保存设置", command=self.save_settings)
+        save_button = ttk.Button(
+            button_frame, text="保存设置", command=self.save_settings
+        )
         save_button.pack(side="left", padx=(0, 10))
 
-        get_cookies_button = ttk.Button(button_frame, text="获取登录Cookies", command=self.run_get_cookies_thread)
+        get_cookies_button = ttk.Button(
+            button_frame, text="获取登录Cookies", command=self.run_get_cookies_thread
+        )
         get_cookies_button.pack(side="left", padx=(0, 10))
 
     def load_settings(self):
@@ -181,41 +273,56 @@ class AutoClassBotApp:
             "start_time": "07:00",
             "end_time": "22:00",
             "headless_mode": False,
-            "ai_model": "豆包AI",
-            "doubao_api_key": "",
+            "ai_model": "Deepseek",
+            "deepseek_api_key": "",
             "gemini_api_key": "",
+            "custom_api_base_url": "",
+            "custom_api_key": "",
+            "custom_model": "",
             "submit_delay": 5,
+            "subjective_delay": 30,
             "check_interval": 60,
             "quiz_refresh_interval": 10,
             "xxtui_api_key": "",
             "last_cookie_warn_date": "",
-            "last_cookie_update_time": "", # 新增字段
-            "chromedriver_path": "" # 新增 ChromeDriver 路径字段
+            "last_cookie_update_time": "",  # 新增字段
+            "chromedriver_path": "",  # 新增 ChromeDriver 路径字段
         }
 
     def save_settings(self):
         try:
+            subjective_delay = int(self.subjective_delay_var.get())
+            if subjective_delay < 0:
+                raise ValueError("主观题作答延迟不能为负数")
             settings = {
                 "start_time": self.start_time_var.get(),
                 "end_time": self.end_time_var.get(),
                 "headless_mode": self.headless_var.get(),
                 "ai_model": self.ai_model_var.get(),
-                "doubao_api_key": self.doubao_key_var.get(),
+                "deepseek_api_key": self.deepseek_key_var.get(),
                 "gemini_api_key": self.gemini_key_var.get(),
+                "custom_api_base_url": self.custom_api_base_url.get(),
+                "custom_api_key": self.custom_api_key.get(),
+                "custom_model": self.custom_model.get(),
                 "submit_delay": int(self.submit_delay_var.get()),
+                "subjective_delay": subjective_delay,
                 "check_interval": int(self.check_interval_var.get()),
                 "quiz_refresh_interval": int(self.quiz_refresh_interval_var.get()),
                 "xxtui_api_key": self.xxtui_key_var.get(),
                 "last_cookie_warn_date": self.settings.get("last_cookie_warn_date", ""),
-                "last_cookie_update_time": self.settings.get("last_cookie_update_time", ""), # 新增字段
-                "chromedriver_path": self.chromedriver_path_var.get() # 保存 ChromeDriver 路径
+                "last_cookie_update_time": self.settings.get(
+                    "last_cookie_update_time", ""
+                ),  # 新增字段
+                "chromedriver_path": self.chromedriver_path_var.get(),  # 保存 ChromeDriver 路径
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=4)
             self.settings = settings
             self.log_message("设置已成功保存。")
         except ValueError:
-            messagebox.showerror("错误", "提交等待时间、检查间隔或答题刷新间隔必须是数字。")
+            messagebox.showerror(
+                "错误", "主观题作答延迟必须为非负整数，其他等待时间和间隔必须为整数。"
+            )
             self.log_message("错误：保存设置失败。")
 
     def run_get_cookies_thread(self):
@@ -229,17 +336,21 @@ class AutoClassBotApp:
             return
 
         driver = self.driver
-        driver.get('https://changjiang.yuketang.cn')
+        driver.get("https://changjiang.yuketang.cn")
 
         try:
-            WebDriverWait(driver, 120).until(EC.presence_of_element_located((By.ID, 'tab-student')))
+            WebDriverWait(driver, 120).until(
+                EC.presence_of_element_located((By.ID, "tab-student"))
+            )
             cookies = driver.get_cookies()
             with open("cookies.txt", "w") as f1:
                 f1.write(json.dumps(cookies))
             self.log_message("Cookies 已成功保存。")
             # 更新cookies更新时间
-            self.settings["last_cookie_update_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.save_settings() # 保存更新时间到配置文件
+            self.settings["last_cookie_update_time"] = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            self.save_settings()  # 保存更新时间到配置文件
             self.update_cookie_info()
         except TimeoutException:
             self.log_message("获取Cookies超时，请重新尝试。")
@@ -254,20 +365,30 @@ class AutoClassBotApp:
 
             last_update_time_str = self.settings.get("last_cookie_update_time")
             if last_update_time_str:
-                last_update_datetime = datetime.strptime(last_update_time_str, "%Y-%m-%d %H:%M:%S")
+                last_update_datetime = datetime.strptime(
+                    last_update_time_str, "%Y-%m-%d %H:%M:%S"
+                )
                 time_difference = datetime.now() - last_update_datetime
                 days_passed = time_difference.days
-                
+
                 remaining_days = 14 - days_passed
-                
+
                 if remaining_days > 0:
-                    self.cookie_status_label.config(text=f"Cookies有效期: 约{remaining_days:.1f}天")
+                    self.cookie_status_label.config(
+                        text=f"Cookies有效期: 约{remaining_days:.1f}天"
+                    )
                 else:
-                    self.cookie_status_label.config(text="Cookies有效期: 已过期", foreground="red")
+                    self.cookie_status_label.config(
+                        text="Cookies有效期: 已过期", foreground="red"
+                    )
             else:
-                self.cookie_status_label.config(text="Cookies有效期: 未知 (未记录更新时间)", foreground="gray")
+                self.cookie_status_label.config(
+                    text="Cookies有效期: 未知 (未记录更新时间)", foreground="gray"
+                )
         else:
-            self.cookie_status_label.config(text="Cookies有效期: 未找到 cookies.txt", foreground="orange")
+            self.cookie_status_label.config(
+                text="Cookies有效期: 未找到 cookies.txt", foreground="orange"
+            )
 
     def check_cookie_expiry_and_notify(self):
         if not os.path.exists("cookies.txt"):
@@ -275,9 +396,11 @@ class AutoClassBotApp:
 
         last_update_time_str = self.settings.get("last_cookie_update_time")
         if not last_update_time_str:
-            return # 如果没有记录更新时间，则不进行提醒
+            return  # 如果没有记录更新时间，则不进行提醒
 
-        last_update_datetime = datetime.strptime(last_update_time_str, "%Y-%m-%d %H:%M:%S")
+        last_update_datetime = datetime.strptime(
+            last_update_time_str, "%Y-%m-%d %H:%M:%S"
+        )
         time_difference = datetime.now() - last_update_datetime
         days_passed = time_difference.days
 
@@ -287,7 +410,11 @@ class AutoClassBotApp:
         last_warn_date = self.settings.get("last_cookie_warn_date", "")
 
         # 如果有效期小于等于3天，且当前时间是8点左右，且今天未发送过提醒
-        if remaining_days <= 3 and now.hour == 8 and now.strftime("%Y-%m-%d") != last_warn_date:
+        if (
+            remaining_days <= 3
+            and now.hour == 8
+            and now.strftime("%Y-%m-%d") != last_warn_date
+        ):
             title = "长江雨课堂助手：Cookies即将过期"
             content = f"您的登录Cookies还剩约{remaining_days:.1f}天过期。请尽快在设置页面重新获取Cookies。"
             self.log_message(f"Cookies有效期不足3天，正在发送微信提醒。")
@@ -303,10 +430,10 @@ class AutoClassBotApp:
             try:
                 while True:
                     message = self.log_queue.get_nowait()
-                    self.log_text.configure(state='normal')
+                    self.log_text.configure(state="normal")
                     self.log_text.insert(tk.END, message)
                     self.log_text.see(tk.END)
-                    self.log_text.configure(state='disabled')
+                    self.log_text.configure(state="disabled")
             except queue.Empty:
                 pass
             self.root.after(100, process_queue)
@@ -318,25 +445,29 @@ class AutoClassBotApp:
         if self.driver is None or not self.driver.service.is_connectable():
             self.log_message("开始初始化浏览器驱动...")
             chrome_options = Options()
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
             if self.settings.get("headless_mode", False):
-                chrome_options.add_argument('--headless=new')
+                chrome_options.add_argument("--headless=new")
             self.log_message("Chrome 选项已配置。")
 
             chromedriver_path = self.settings.get("chromedriver_path")
             service = None
 
             if chromedriver_path and os.path.exists(chromedriver_path):
-                self.log_message(f"检测到本地 ChromeDriver 路径：{chromedriver_path}，尝试使用本地驱动。")
+                self.log_message(
+                    f"检测到本地 ChromeDriver 路径：{chromedriver_path}，尝试使用本地驱动。"
+                )
                 try:
                     service = Service(executable_path=chromedriver_path)
                     self.log_message("已使用本地 ChromeDriver 服务。")
                 except Exception as e:
-                    self.log_message(f"使用本地 ChromeDriver 失败：{e}。将尝试在线获取。")
-                    service = None # 重置 service，以便尝试在线获取
-            
-            if service is None: # 如果本地驱动失败或未提供，则尝试在线获取
+                    self.log_message(
+                        f"使用本地 ChromeDriver 失败：{e}。将尝试在线获取。"
+                    )
+                    service = None  # 重置 service，以便尝试在线获取
+
+            if service is None:  # 如果本地驱动失败或未提供，则尝试在线获取
                 self.log_message("正在尝试在线安装或获取 ChromeDriver 服务...")
                 try:
                     service = Service(ChromeDriverManager().install())
@@ -345,7 +476,9 @@ class AutoClassBotApp:
                     self.log_message(f"在线安装或获取 ChromeDriver 服务失败：{e}")
                     self.log_message("请检查以下可能的原因：")
                     self.log_message("1. 您的网络连接是否正常，以便下载 ChromeDriver。")
-                    self.log_message("2. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。")
+                    self.log_message(
+                        "2. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。"
+                    )
                     self.log_message("3. 运行环境是否有足够的权限启动浏览器。")
                     self.log_message("4. 尝试更新 Chrome 浏览器到最新版本。")
                     self.driver = None
@@ -357,7 +490,9 @@ class AutoClassBotApp:
             except Exception as e:
                 self.log_message(f"启动浏览器失败：{e}")
                 self.log_message("请检查以下可能的原因：")
-                self.log_message("1. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。")
+                self.log_message(
+                    "1. 您的 Chrome 浏览器是否已安装且版本与 ChromeDriver 兼容。"
+                )
                 self.log_message("2. 运行环境是否有足够的权限启动浏览器。")
                 self.log_message("3. 尝试更新 Chrome 浏览器到最新版本。")
                 self.driver = None
@@ -413,7 +548,9 @@ class AutoClassBotApp:
                     self.log_message("正在检查是否有正在进行的课程...")
                     self.get_into_class(self.driver)
                 else:
-                    self.log_message(f"当前时间不在设置的检查时间段内 ({start_time_str} - {end_time_str})，跳过检查。")
+                    self.log_message(
+                        f"当前时间不在设置的检查时间段内 ({start_time_str} - {end_time_str})，跳过检查。"
+                    )
 
                 # 等待设定的检查间隔
                 self.update_cookie_info()
@@ -433,11 +570,11 @@ class AutoClassBotApp:
             if not self._check_network_connectivity():
                 self.log_message(f"网络不通，将在 {retry_delay} 秒后重试...")
                 self.stop_event.wait(retry_delay)
-                continue # 跳过当前循环，直接进入下一次重试
+                continue  # 跳过当前循环，直接进入下一次重试
 
             try:
                 # 移除driver初始化代码，直接使用传入的driver
-                driver.get('https://changjiang.yuketang.cn')
+                driver.get("https://changjiang.yuketang.cn")
 
                 if not os.path.exists("cookies.txt"):
                     self.log_message("未找到 cookies.txt，请先在'设置'中获取。")
@@ -449,7 +586,9 @@ class AutoClassBotApp:
                     driver.add_cookie(cook)
                 driver.refresh()
 
-                WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
                 # 根据用户反馈，移除等待加载条消失的功能
                 # self.log_message("等待加载条消失...")
                 # WebDriverWait(driver, 10).until(
@@ -459,16 +598,25 @@ class AutoClassBotApp:
                 self.log_message("正在检查是否有正在进行的课程...")
                 class_element_xpath = '//*[contains(@class, "onlesson")]'
                 try:
-                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, class_element_xpath)))
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, class_element_xpath))
+                    )
                     driver.find_element(By.XPATH, class_element_xpath).click()
 
                     # 引用新的变量，用于日志提示
-                    quiz_refresh_interval = int(self.settings.get("quiz_refresh_interval", 10))
-                    self.log_message(f"我去上课啦！我将会每{quiz_refresh_interval}秒检测一次随堂测试和签到，直到下课。")
+                    quiz_refresh_interval = int(
+                        self.settings.get("quiz_refresh_interval", 10)
+                    )
+                    self.log_message(
+                        f"我去上课啦！我将会每{quiz_refresh_interval}秒检测一次随堂测试和签到，直到下课。"
+                    )
                     driver.switch_to.window(driver.window_handles[-1])
 
                     while not self.stop_event.is_set():
-                        if driver.find_elements(By.XPATH, '//div[@title="下课啦！" and contains(@class, "timeline__msg")]'):
+                        if driver.find_elements(
+                            By.XPATH,
+                            '//div[@title="下课啦！" and contains(@class, "timeline__msg")]',
+                        ):
                             self.log_message("检测到下课啦！自动答题已停止。")
                             break
 
@@ -476,32 +624,38 @@ class AutoClassBotApp:
                         self.answer(driver)
                         # 使用新的设置值
                         self.stop_event.wait(quiz_refresh_interval)
-                    return True # 课程结束或停止事件触发，退出重试循环
+                    return True  # 课程结束或停止事件触发，退出重试循环
                 except TimeoutException:
                     self.log_message("你现在没课。")
-                    return False # 没课，退出重试循环，不进行重试
+                    return False  # 没课，退出重试循环，不进行重试
                 except (NoSuchElementException, ElementNotInteractableException) as e:
-                    self.log_message(f"未能点击课程元素或发生其他页面交互错误：{e}。将在 {retry_delay} 秒后重试...")
-                    self.stop_event.wait(retry_delay) # 等待一段时间后重试
-                    continue # 继续外层 while 循环进行重试
+                    self.log_message(
+                        f"未能点击课程元素或发生其他页面交互错误：{e}。将在 {retry_delay} 秒后重试..."
+                    )
+                    self.stop_event.wait(retry_delay)  # 等待一段时间后重试
+                    continue  # 继续外层 while 循环进行重试
 
             except requests.exceptions.RequestException as e:
-                self.log_message(f"检测上课时发生网络请求错误：{e}。将在 {retry_delay} 秒后重试...")
+                self.log_message(
+                    f"检测上课时发生网络请求错误：{e}。将在 {retry_delay} 秒后重试..."
+                )
                 self.stop_event.wait(retry_delay)
             except Exception as e:
                 error_traceback = traceback.format_exc()
-                self.log_message(f"检测上课时发生意外错误：{e}\n详细堆栈信息：\n{error_traceback}。将在 {retry_delay} 秒后重试...")
+                self.log_message(
+                    f"检测上课时发生意外错误：{e}\n详细堆栈信息：\n{error_traceback}。将在 {retry_delay} 秒后重试..."
+                )
                 self.stop_event.wait(retry_delay)
             finally:
                 self.log_message("检查课程流程结束。")
-        return False # 如果停止事件被设置，退出重试循环
+        return False  # 如果停止事件被设置，退出重试循环
 
     def _check_network_connectivity(self):
         """通过 requests 访问雨课堂网站检查网络连通性"""
         self.log_message("正在检查网络连通性...")
         try:
             # 尝试访问雨课堂网站，设置较短的超时
-            requests.get('https://changjiang.yuketang.cn', timeout=5)
+            requests.get("https://changjiang.yuketang.cn", timeout=5)
             self.log_message("网络连接正常。")
             return True
         except requests.exceptions.RequestException as e:
@@ -518,18 +672,25 @@ class AutoClassBotApp:
             return
 
         api_url = f"https://www.xxtui.com/xxtui/{xxtui_key}"
-        headers = {'Content-Type': 'application/json'}
-        data = {"from": "课堂机器人", "title": title, "content": content, "channel": "WX_MP"}
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "from": "课堂机器人",
+            "title": title,
+            "content": content,
+            "channel": "WX_MP",
+        }
 
         self.log_message("正在向xxtui发送通知。")
         try:
             response = requests.post(api_url, headers=headers, json=data, timeout=5)
             response.raise_for_status()
             result = response.json()
-            if result.get('code') == 0:
+            if result.get("code") == 0:
                 self.log_message("微信通知发送成功。")
             else:
-                self.log_message(f"微信通知发送失败，错误码：{result.get('code')}，信息：{result.get('message')}")
+                self.log_message(
+                    f"微信通知发送失败，错误码：{result.get('code')}，信息：{result.get('message')}"
+                )
         except requests.exceptions.RequestException as e:
             self.log_message(f"发送微信通知时发生错误：{e}")
 
@@ -538,14 +699,14 @@ class AutoClassBotApp:
         根据配置的模型调用AI并返回答案
         question_type: 'objective' 或 'subjective'
         """
-        model = self.settings.get("ai_model", "豆包AI")
+        model = self.settings.get("ai_model", "Deepseek")
         prompt = ""
         if question_type == "objective":
             # 引导AI做出最快的回答，强调简洁和直接
             prompt = "请快速分析这张图片中的习题。如果是单选题，请只返回一个选项字母（如 A）。如果是多选题，请返回所有正确选项的字母，并用逗号分隔（如 A,B,C）。如果无法确定，请返回 'C'。请确保回答简洁直接，不要包含任何额外信息。"
         elif question_type == "subjective":
             # 引导AI做出最快的回答，强调简洁和直接
-            prompt = "请快速解答这张图片中的主观题。请直接给出你的答案，不要包含任何额外的解释或格式，力求简洁明了。"
+            prompt = "请快速解答这张图片中的主观题。只返回纯文本答案，不要使用 Markdown 代码块，不要额外解释，保留必要的换行。"
 
         # 下载图片
         try:
@@ -556,27 +717,62 @@ class AutoClassBotApp:
             self.log_message(f"下载题目图片失败：{e}")
             return "图片下载失败，无法获取答案。"
 
-        if model == "豆包AI":
-            doubao_key = self.settings.get("doubao_api_key")
-            if not doubao_key:
-                return "未设置豆包AI API Key，无法获取答案。"
+        if model == "Deepseek":
+            model_key = self.settings.get("deepseek_api_key")
+            if not model:
+                return "未设置Deepseek API Key，无法获取答案。"
 
             try:
                 client = OpenAI(
-                    base_url="https://ark.cn-beijing.volces.com/api/v3",
-                    api_key=doubao_key,
+                    base_url="https://api.deepseek.com",
+                    api_key=model_key,
                 )
                 response = client.chat.completions.create(
-                    model="doubao-seed-1-6-250615",
+                    model="deepseek-flash",
                     messages=[
-                        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_url}},
-                                                     {"type": "text", "text": prompt}]}
-                    ], timeout=8
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": image_url}},
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
+                    timeout=8,
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
-                self.log_message(f"调用豆包AI API失败或超时：{e}")
-                return "豆包AI调用失败。"
+                self.log_message(f"调用Deepseek API失败或超时：{e}")
+                return "Deepseek调用失败。"
+        elif model == "Custom":
+            model_name: str = self.settings.get("custom_model")  # type: ignore
+            model_base_url = self.settings.get("custom_api_base_url")
+            model_key = self.settings.get("custom_api_key")
+            if not model:
+                return "未设置API Key，无法获取答案。"
+
+            try:
+                client = OpenAI(
+                    base_url=model_base_url,
+                    api_key=model_key,
+                )
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": image_url}},
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
+                    timeout=8,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                self.log_message(f"调用自定义API失败或超时：{e}")
+                return "自定义API调用失败。"
 
         elif model == "Gemini AI":
             gemini_key = self.settings.get("gemini_api_key")
@@ -585,16 +781,34 @@ class AutoClassBotApp:
 
             # 根据用户反馈，将模型名称从 'gemini-2.5-flash-preview-05-20' 改为 'gemini-2.5-flash'
             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-            base64_image = base64.b64encode(image_bytes).decode('utf-8')
-            payload = {"contents": [
-                {"parts": [{"text": prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": base64_image}}]}]}
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": base64_image,
+                                }
+                            },
+                        ]
+                    }
+                ]
+            }
 
             try:
                 response = requests.post(api_url, json=payload, timeout=15)
                 response.raise_for_status()
                 result = response.json()
-                candidate = result.get('candidates', [{}])[0]
-                return candidate.get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                candidate = result.get("candidates", [{}])[0]
+                return (
+                    candidate.get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                    .strip()
+                )
             except requests.exceptions.RequestException as e:
                 self.log_message(f"调用Gemini AI API失败或超时：{e}")
                 return "Gemini AI调用失败。"
@@ -608,11 +822,120 @@ class AutoClassBotApp:
                 EC.element_to_be_clickable((By.XPATH, sign_in_button_xpath))
             )
             self.log_message("检测到签到。")
-            self.send_wechat_notification("自动签到提醒", "课程有签到任务，正在自动签到。")
+            self.send_wechat_notification(
+                "自动签到提醒", "课程有签到任务，正在自动签到。"
+            )
             sign_in_button.click()
             self.log_message("已成功自动签到。")
-        except (TimeoutException, NoSuchElementException, ElementNotInteractableException):
+        except (
+            TimeoutException,
+            NoSuchElementException,
+            ElementNotInteractableException,
+        ):
             pass
+
+    def answer_subjective(self, driver, answer_button_xpath):
+        image_selector = ".lesson__container .page-subjective .slide__cmp img.cover"
+        input_selector = (
+            ".lesson__container .page-subjective .answer__wrapper "
+            "textarea.submission-textarea"
+        )
+        try:
+            self.log_message("检测到主观题，正在获取AI答案。")
+            question_image = WebDriverWait(driver, 3).until(
+                wait_for_image_src((By.CSS_SELECTOR, image_selector))
+            )
+            image_url = question_image.get_attribute("src")
+            ai_answer = (
+                self.get_ai_answer(image_url, question_type="subjective") or ""
+            ).strip()
+            if not ai_answer or any(
+                error in ai_answer
+                for error in ("调用失败", "无法获取答案", "无法获取AI答案")
+            ):
+                self.log_message(f"主观题未获得有效AI答案，已跳过提交：{ai_answer}")
+                return
+
+            delay = int(self.settings.get("subjective_delay", 30))
+            if delay < 0:
+                raise ValueError("主观题作答延迟不能为负数")
+            self.log_message(
+                f"AI给出的答案是：{ai_answer}；将在 {delay} 秒后作答并提交。"
+            )
+            if self.stop_event.wait(delay):
+                self.log_message("已取消主观题自动作答。")
+                return
+            if (
+                driver.find_element(By.CSS_SELECTOR, image_selector).get_attribute(
+                    "src"
+                )
+                != image_url
+            ):
+                self.log_message("等待期间题目已切换，已取消本次主观题提交。")
+                return
+
+            WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, answer_button_xpath))
+            ).click()
+            answer_input = WebDriverWait(driver, 5).until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, input_selector))
+            )
+            max_length = answer_input.get_attribute("maxlength")
+            if max_length and 0 <= int(max_length) < len(ai_answer):
+                self.log_message(
+                    f"AI答案超过输入框的 {max_length} 字限制，已跳过提交。"
+                )
+                return
+            answer_input.clear()
+            answer_input.send_keys(ai_answer)
+            if answer_input.get_attribute("value") != ai_answer:
+                self.log_message("主观题答案未完整填入，已取消提交。")
+                return
+
+            submit_button_xpath = (
+                '//section[contains(@class, "lesson__container")]'
+                '//section[contains(@class, "page-subjective")]'
+                '//section[contains(@class, "answer__wrapper")]'
+                '//*[contains(@class, "submit-btn") and normalize-space(.)="提交答案" '
+                'and not(contains(@class, "disable"))]'
+            )
+            submit_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, submit_button_xpath))
+            )
+            if self.stop_event.is_set():
+                return
+            if (
+                driver.find_element(By.CSS_SELECTOR, image_selector).get_attribute(
+                    "src"
+                )
+                != image_url
+            ):
+                self.log_message("填写期间题目已切换，已取消本次主观题提交。")
+                return
+            submit_button.click()
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located(
+                        (By.CSS_SELECTOR, input_selector)
+                    )
+                )
+            except TimeoutException:
+                self.log_message(
+                    "已点击主观题“提交答案”，但未确认提交结果，请检查页面。"
+                )
+                return
+            self.log_message("主观题答案已提交。")
+            self.send_wechat_notification(
+                "自动答题提醒", f"课程检测到主观题，已自动提交答案：\n\n{ai_answer}"
+            )
+        except (
+            TimeoutException,
+            NoSuchElementException,
+            ElementNotInteractableException,
+            StaleElementReferenceException,
+            ValueError,
+        ) as e:
+            self.log_message(f"主观题作答或提交未完成：{e}")
 
     def answer(self, driver):
         try:
@@ -625,7 +948,7 @@ class AutoClassBotApp:
         except (TimeoutException, ElementNotInteractableException):
             self.log_message("未找到习题提示，正在检查是否有未提交习题...")
             try:
-                submit_button_xpath = '//div[contains(@class, "submit-btn") and contains(text(), "提交答案")]'
+                submit_button_xpath = '//div[contains(@class, "submit-btn") and (contains(text(), "提交答案") or contains(text(), "作答"))]'
                 WebDriverWait(driver, 1).until(
                     EC.element_to_be_clickable((By.XPATH, submit_button_xpath))
                 )
@@ -636,22 +959,17 @@ class AutoClassBotApp:
 
         try:
             # 尝试找到主观题的“作答”按钮
-            answer_button_xpath = '//div[contains(@class, "submit-btn") and contains(text(), "作答")]'
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, answer_button_xpath)))
-
-            # 如果找到，说明是主观题
-            self.log_message("检测到主观题（'作答'按钮），正在尝试获取AI答案。")
-
-            question_image = WebDriverWait(driver, 3).until(
-                wait_for_image_src(
-                    (By.XPATH, '//section[contains(@class, "slide__cmp")]//img[contains(@class, "cover")]'))
+            answer_button_xpath = (
+                '//section[contains(@class, "lesson__container")]'
+                '//section[contains(@class, "page-subjective")]'
+                '//div[contains(@class, "submit-btn") and normalize-space(.)="作答" '
+                'and not(contains(@class, "disable"))]'
             )
-            image_url = question_image.get_attribute('src')
-            ai_answer = self.get_ai_answer(image_url, question_type="subjective")
+            WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, answer_button_xpath))
+            )
 
-            self.log_message(f"AI给出的答案是：{ai_answer}")
-            self.send_wechat_notification("自动答题提醒",
-                                          f"课程检测到主观题，已跳过作答。以下是AI给出的参考答案：\n\n{ai_answer}")
+            self.answer_subjective(driver, answer_button_xpath)
             return
 
         except (TimeoutException, NoSuchElementException):
@@ -660,27 +978,38 @@ class AutoClassBotApp:
         try:
             self.log_message("正在等待习题容器加载...")
             question_container = WebDriverWait(driver, 1).until(
-                EC.visibility_of_element_located((By.XPATH, '//section[contains(@class, "slide__cmp")]'))
+                EC.visibility_of_element_located(
+                    (By.XPATH, '//section[contains(@class, "slide__cmp")]')
+                )
             )
             self.log_message("习题容器已加载，正在等待题目图片...")
             question_image = WebDriverWait(question_container, 1).until(
                 wait_for_image_src((By.XPATH, './/img[contains(@class, "cover")]'))
             )
-            image_url = question_image.get_attribute('src')
+            image_url = question_image.get_attribute("src")
             self.log_message(f"题目图片链接已成功捕获，URL为：{image_url}")
 
-            predicted_options_str = self.get_ai_answer(image_url, question_type="objective")
+            predicted_options_str = self.get_ai_answer(
+                image_url, question_type="objective"
+            )
 
             is_option_clicked = False
 
             # --- START: 验证并处理 AI 答案的逻辑 ---
             if predicted_options_str and "调用失败" not in predicted_options_str:
                 # 过滤出有效的字母和逗号
-                cleaned_answer = ''.join(c for c in predicted_options_str.upper() if 'A' <= c <= 'Z' or c == ',')
+                cleaned_answer = "".join(
+                    c
+                    for c in predicted_options_str.upper()
+                    if "A" <= c <= "Z" or c == ","
+                )
 
                 # 再次验证，确保清洗后的答案不为空且只包含有效的答案字符
-                valid_options = [opt.strip() for opt in cleaned_answer.split(',') if
-                                 opt.strip() in ['A', 'B', 'C', 'D']]  # 假设只有 A,B,C,D
+                valid_options = [
+                    opt.strip()
+                    for opt in cleaned_answer.split(",")
+                    if opt.strip() in ["A", "B", "C", "D", "E", "F", "G"]
+                ]  # 假设只有 A,B,C,D
 
                 if valid_options:
                     self.log_message(f"AI预测的答案是：{', '.join(valid_options)}")
@@ -692,31 +1021,52 @@ class AutoClassBotApp:
                             )
                             answer_element.click()
                             is_option_clicked = True
-                        except (TimeoutException, NoSuchElementException, ElementNotInteractableException):
+                        except (
+                            TimeoutException,
+                            NoSuchElementException,
+                            ElementNotInteractableException,
+                        ):
                             self.log_message(f"未能点击选项 {option}。")
                 else:
-                    self.log_message(f"AI返回了无效的答案：{predicted_options_str}。将尝试默认选项。")
+                    self.log_message(
+                        f"AI返回了无效的答案：{predicted_options_str}。将尝试默认选项。"
+                    )
             else:
                 self.log_message("AI未能提供有效答案或返回了错误信息，将尝试默认选项。")
             # --- END: 验证并处理 AI 答案的逻辑 ---
 
             if not is_option_clicked:
-                self.log_message("AI未能提供有效答案或未能成功点击预测选项，将选择默认选项 A。")
+                self.log_message(
+                    "AI未能提供有效答案或未能成功点击预测选项，将选择默认选项 A。"
+                )
                 answer_xpath = '//p[@data-option="A"]'
                 try:
                     answer_element = WebDriverWait(driver, 1).until(
-                        EC.element_to_be_clickable((By.XPATH, answer_xpath)))
+                        EC.element_to_be_clickable((By.XPATH, answer_xpath))
+                    )
                     answer_element.click()
                     self.log_message("已成功选择默认选项 A。")
-                except (TimeoutException, NoSuchElementException, ElementNotInteractableException) as e:
+                except (
+                    TimeoutException,
+                    NoSuchElementException,
+                    ElementNotInteractableException,
+                ) as e:
                     self.log_message(f"无法点击默认选项A，错误信息: {e}")
 
-            submit_button_xpath = '//div[contains(@class, "submit-btn") and contains(text(), "提交答案")]'
-            submit_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, submit_button_xpath)))
+            submit_button_xpath = (
+                '//div[contains(@class, "submit-btn") and contains(text(), "提交答案")]'
+            )
+            submit_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, submit_button_xpath))
+            )
             self.log_message("尝试使用JavaScript提交答案。")
             driver.execute_script("arguments[0].click();", submit_button)
             self.log_message("已提交答案。")
-        except (TimeoutException, NoSuchElementException, ElementNotInteractableException) as e:
+        except (
+            TimeoutException,
+            NoSuchElementException,
+            ElementNotInteractableException,
+        ) as e:
             self.log_message(f"无法完成答题流程，可能找不到题目或选项。错误信息: {e}")
             pass
 
